@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Camera Scanner</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      #wrap {
+        position: relative;
+        width: 100%;
+        height: 100%;
+      }
+      #video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        background: #000;
+      }
+      #overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      #ui {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 12px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(
+          to top,
+          rgba(0, 0, 0, 0.6),
+          rgba(0, 0, 0, 0)
+        );
+      }
+      #ui button,
+      #ui select {
+        appearance: none;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(0, 0, 0, 0.5);
+        color: #fff;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 14px;
+      }
+      #closeBtn {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: none;
+        color: #fff;
+        background: rgba(0, 0, 0, 0.6);
+        font-size: 22px;
+        cursor: pointer;
+        z-index: 10;
+      }
+      #status {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        color: #0f0;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 6px 10px;
+        border-radius: 8px;
+        font-family: system-ui, sans-serif;
+        font-size: 13px;
+        max-width: 70vw;
+        word-wrap: break-word;
+      }
+    </style>
+    <script src="https://unpkg.com/@zxing/library@0.21.2"></script>
+    <script src="https://unpkg.com/@zxing/browser@0.2.4"></script>
+  </head>
+  <body>
+    <div id="wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div id="status">Initializing…</div>
+      <button id="closeBtn" title="Close">×</button>
+
+      <div id="ui">
+        <select id="deviceSelect" title="Select camera"></select>
+        <button id="toggleTorch">Torch</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="resumeBtn" disabled>Resume</button>
+      </div>
+    </div>
+
+    <script>
+      const {
+        BrowserMultiFormatReader,
+        NotFoundException,
+        BarcodeFormat,
+        DecodeHintType,
+      } = ZXing;
+      const video = document.getElementById("video");
+      const overlay = document.getElementById("overlay");
+      const ctx = overlay.getContext("2d");
+      const closeBtn = document.getElementById("closeBtn");
+      const deviceSelect = document.getElementById("deviceSelect");
+      const torchBtn = document.getElementById("toggleTorch");
+      const pauseBtn = document.getElementById("pauseBtn");
+      const resumeBtn = document.getElementById("resumeBtn");
+      const statusEl = document.getElementById("status");
+
+      let codeReader;
+      let currentDeviceId = null;
+      let currentStream = null;
+      let scanning = true;
+      let torchOn = false;
+
+      function postToRN(payload) {
+        try {
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+          } else {
+            console.log("[RN MESSAGE]", payload);
+          }
+        } catch (e) {
+          console.warn("postMessage failed", e);
+        }
+      }
+
+      closeBtn.addEventListener("click", () => {
+        stopStream();
+        postToRN({ type: "close" });
+      });
+      pauseBtn.addEventListener("click", () => {
+        scanning = false;
+        pauseBtn.disabled = true;
+        resumeBtn.disabled = false;
+        codeReader?.stopStreams();
+        statusEl.textContent = "Paused";
+      });
+      resumeBtn.addEventListener("click", async () => {
+        scanning = true;
+        resumeBtn.disabled = true;
+        pauseBtn.disabled = false;
+        statusEl.textContent = "Resuming…";
+        await startDecoding(currentDeviceId);
+      });
+
+      torchBtn.addEventListener("click", async () => {
+        try {
+          if (!currentStream) return;
+          const track = currentStream.getVideoTracks()[0];
+          const caps = track.getCapabilities?.();
+          if (caps && caps.torch) {
+            torchOn = !torchOn;
+            await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+            torchBtn.textContent = torchOn ? "Torch (On)" : "Torch";
+          } else {
+            alert("Torch not supported on this camera.");
+          }
+        } catch (e) {
+          console.error("Torch toggle failed", e);
+          alert("Cannot toggle torch: " + e.message);
+        }
+      });
+
+      deviceSelect.addEventListener("change", async (e) => {
+        const id = e.target.value;
+        currentDeviceId = id;
+        await startDecoding(id);
+      });
+
+      function stopStream() {
+        try {
+          codeReader?.stopStreams();
+        } catch {}
+        if (currentStream) {
+          currentStream.getTracks().forEach((t) => t.stop());
+          currentStream = null;
+        }
+      }
+
+      function drawOverlayBox() {
+        const w = overlay.width,
+          h = overlay.height;
+        ctx.clearRect(0, 0, w, h);
+        const boxW = Math.min(w, h) * 0.7,
+          boxH = boxW * 0.6;
+        const x = (w - boxW) / 2,
+          y = (h - boxH) / 2;
+        ctx.strokeStyle = "rgba(0,255,0,0.8)";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, boxW, boxH);
+      }
+      function resizeCanvas() {
+        overlay.width = video.videoWidth || overlay.clientWidth;
+        overlay.height = video.videoHeight || overlay.clientHeight;
+        drawOverlayBox();
+      }
+
+      async function listDevicesAndInit() {
+        codeReader = new BrowserMultiFormatReader();
+        const devices = await BrowserMultiFormatReader.listVideoInputDevices();
+        deviceSelect.innerHTML = "";
+        devices.forEach((d) => {
+          const opt = document.createElement("option");
+          opt.value = d.deviceId;
+          opt.textContent = d.label || `Camera ${deviceSelect.length + 1}`;
+          deviceSelect.appendChild(opt);
+        });
+        if (devices.length === 0) {
+          statusEl.textContent = "No camera found";
+          postToRN({ type: "error", message: "No camera found" });
+          return;
+        }
+        let picked = devices[0].deviceId;
+        const back = devices.find((d) =>
+          /back|rear|environment/i.test(d.label)
+        );
+        if (back) picked = back.deviceId;
+        currentDeviceId = picked;
+        deviceSelect.value = currentDeviceId;
+        await startDecoding(currentDeviceId);
+      }
+
+      async function startDecoding(deviceId) {
+        try {
+          stopStream();
+          statusEl.textContent = "Starting camera…";
+          currentStream = await navigator.mediaDevices.getUserMedia({
+            video: deviceId
+              ? { deviceId: { exact: deviceId } }
+              : { facingMode: "environment" },
+            audio: false,
+          });
+          video.srcObject = currentStream;
+          await new Promise((res) => {
+            if (video.readyState >= 2) res();
+            else video.onloadedmetadata = () => res();
+          });
+          resizeCanvas();
+          video.onresize = resizeCanvas;
+          postToRN({ type: "ready" });
+          statusEl.textContent = "Scanning…";
+
+          const hints = new Map();
+          const formats = [
+            BarcodeFormat.QR_CODE,
+            BarcodeFormat.EAN_13,
+            BarcodeFormat.EAN_8,
+            BarcodeFormat.CODE_128,
+            BarcodeFormat.CODE_39,
+            BarcodeFormat.UPC_A,
+            BarcodeFormat.UPC_E,
+            BarcodeFormat.ITF,
+          ];
+          hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
+          codeReader = new BrowserMultiFormatReader(hints);
+
+          await codeReader.decodeFromVideoDevice(
+            deviceId || null,
+            video,
+            (result, err) => {
+              if (!scanning) return;
+              drawOverlayBox();
+              if (result) {
+                const text = result.getText
+                  ? result.getText()
+                  : result.text || "";
+                const format = result.getBarcodeFormat
+                  ? result.getBarcodeFormat()
+                  : result.barcodeFormat || result.format || "UNKNOWN";
+                statusEl.textContent = `Found: ${text} (${format})`;
+                postToRN({ type: "scan", text, format, ts: Date.now() });
+                scanning = false;
+                pauseBtn.disabled = true;
+                resumeBtn.disabled = false;
+                setTimeout(() => {
+                  statusEl.textContent = "Paused after detection";
+                }, 100);
+              } else if (err && !(err instanceof NotFoundException)) {
+                console.warn(err);
+                statusEl.textContent = "Error while scanning";
+              }
+            }
+          );
+        } catch (e) {
+          console.error("startDecoding error", e);
+          statusEl.textContent = "Camera error: " + e.message;
+          postToRN({ type: "error", message: e.message });
+        }
+      }
+
+      (async () => {
+        try {
+          await listDevicesAndInit();
+        } catch (e) {
+          console.error(e);
+          statusEl.textContent = "Init error: " + e.message;
+          postToRN({ type: "error", message: e.message });
+        }
+      })();
+    </script>
+  </body>
+</html>
