@@ -2,17 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Barcode Scanner</title>
+    <title>Scanner</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
       html,
       body {
         margin: 0;
-        padding: 0;
-        width: 100%;
         height: 100%;
         background: #000;
-        font-family: system-ui, sans-serif;
         overflow: hidden;
       }
       #wrap {
@@ -33,31 +30,6 @@
         inset: 0;
         pointer-events: none;
       }
-      .title {
-        color: #fff;
-        text-align: center;
-        font-size: 18px;
-        font-weight: 400;
-        position: absolute;
-        top: 60px;
-        left: 0;
-        right: 0;
-        z-index: 5;
-      }
-      .title b {
-        font-weight: 700;
-      }
-      .close-btn {
-        position: absolute;
-        top: 20px;
-        right: 20px;
-        background: none;
-        border: none;
-        color: #fff;
-        font-size: 28px;
-        cursor: pointer;
-        z-index: 5;
-      }
     </style>
     <script src="https://unpkg.com/@zxing/library@0.21.2"></script>
     <script src="https://unpkg.com/@zxing/browser@0.2.4"></script>
@@ -66,100 +38,27 @@
     <div id="wrap">
       <video id="video" autoplay playsinline muted></video>
       <canvas id="overlay"></canvas>
-
-      <div class="title">
-        Enter the barcode of the <b>first sachet</b><br />in the new roll.
-      </div>
-
-      <button class="close-btn" onclick="sendClose()">×</button>
     </div>
 
     <script>
       const video = document.getElementById("video");
-      const overlay = document.getElementById("overlay");
-      const ctx = overlay.getContext("2d");
       const ZX = window.ZXingBrowser || window.ZXing;
       const { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } = ZX;
 
-      let reader = null;
       let scanning = true;
-
-      function sendMessage(obj) {
-        if (window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify(obj));
-        } else {
-          console.log("[RN]", obj);
-        }
-      }
-      function sendClose() {
-        sendMessage({ type: "close" });
+      function post(msg) {
+        try {
+          if (window.ReactNativeWebView)
+            window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+          else console.log("[RN]", msg);
+        } catch (_) {}
       }
 
       window.__setScanning = (flag) => {
         scanning = !!flag;
-        resizeCanvas();
       };
 
-      function drawMask(w, h, withHole = true) {
-        const boxW = w * 0.5;
-        const boxH = h * 0.5;
-        const x = (w - boxW) / 2;
-        const y = (h - boxH) / 2;
-
-        ctx.clearRect(0, 0, w, h);
-        ctx.fillStyle = "rgba(22, 91, 118, 0.9)";
-        ctx.fillRect(0, 0, w, h);
-
-        if (withHole) {
-          ctx.globalCompositeOperation = "destination-out";
-          ctx.fillStyle = "#000";
-          ctx.fillRect(x, y, boxW, boxH);
-          ctx.globalCompositeOperation = "source-over";
-
-          const r = 12,
-            corner = 30,
-            lw = 5;
-          ctx.lineWidth = lw;
-          ctx.strokeStyle = "#fff";
-          ctx.beginPath();
-          // TL
-          ctx.moveTo(x, y + corner);
-          ctx.lineTo(x, y + r);
-          ctx.quadraticCurveTo(x, y, x + r, y);
-          ctx.lineTo(x + corner, y);
-          // TR
-          ctx.moveTo(x + boxW - corner, y);
-          ctx.lineTo(x + boxW - r, y);
-          ctx.quadraticCurveTo(x + boxW, y, x + boxW, y + r);
-          ctx.lineTo(x + boxW, y + corner);
-          // BR
-          ctx.moveTo(x + boxW, y + boxH - corner);
-          ctx.lineTo(x + boxW, y + boxH - r);
-          ctx.quadraticCurveTo(x + boxW, y + boxH, x + boxW - r, y + boxH);
-          ctx.lineTo(x + boxW - corner, y + boxH);
-          // BL
-          ctx.moveTo(x + corner, y + boxH);
-          ctx.lineTo(x + r, y + boxH);
-          ctx.quadraticCurveTo(x, y + boxH, x, y + boxH - r);
-          ctx.lineTo(x, y + boxH - corner);
-          ctx.stroke();
-        }
-      }
-
-      function resizeCanvas() {
-        const cssW = video.clientWidth || window.innerWidth;
-        const cssH = video.clientHeight || window.innerHeight;
-        const dpr = window.devicePixelRatio || 1;
-        overlay.width = cssW * dpr;
-        overlay.height = cssH * dpr;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        drawMask(cssW, cssH, scanning);
-      }
-      window.addEventListener("resize", () =>
-        requestAnimationFrame(resizeCanvas)
-      );
-
-      async function startScanner() {
+      async function start() {
         try {
           const hints = new Map();
           hints.set(DecodeHintType.POSSIBLE_FORMATS, [
@@ -172,24 +71,21 @@
             BarcodeFormat.ITF,
             BarcodeFormat.QR_CODE,
           ]);
-          reader = new BrowserMultiFormatReader(hints);
-
-          sendMessage({ type: "ready" });
-
+          const reader = new BrowserMultiFormatReader(hints);
+          post({ type: "ready" });
           await reader.decodeFromVideoDevice(null, video, (result) => {
-            resizeCanvas();
             if (!scanning) return;
             if (result) {
               const text = result.getText?.() || result.text || "";
-              sendMessage({ type: "scan", text });
+              post({ type: "scan", text, ts: Date.now() });
             }
           });
         } catch (e) {
           console.error(e);
-          sendMessage({ type: "error", message: e.message });
+          post({ type: "error", message: e.message || "Camera error" });
         }
       }
-      startScanner();
+      start();
     </script>
   </body>
 </html>
