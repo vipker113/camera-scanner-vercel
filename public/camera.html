@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Camera Scanner</title>
+    <title>Barcode Scanner</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
       html,
@@ -12,6 +12,7 @@
         width: 100%;
         height: 100%;
         background: #000;
+        font-family: system-ui, sans-serif;
         overflow: hidden;
       }
       #wrap {
@@ -20,6 +21,8 @@
         height: 100%;
       }
       #video {
+        position: absolute;
+        inset: 0;
         width: 100%;
         height: 100%;
         object-fit: cover;
@@ -30,59 +33,131 @@
         inset: 0;
         pointer-events: none;
       }
-      #ui {
+      .title {
+        color: #fff;
+        text-align: center;
+        font-size: 18px;
+        font-weight: 400;
         position: absolute;
+        top: 60px;
         left: 0;
         right: 0;
-        bottom: 0;
-        padding: 12px;
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: center;
-        background: linear-gradient(
-          to top,
-          rgba(0, 0, 0, 0.6),
-          rgba(0, 0, 0, 0)
-        );
+        z-index: 5;
       }
-      #ui button,
-      #ui select {
-        appearance: none;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        background: rgba(0, 0, 0, 0.5);
-        color: #fff;
-        border-radius: 10px;
-        padding: 8px 12px;
-        font-size: 14px;
+      .title b {
+        font-weight: 700;
       }
-      #closeBtn {
+      .manual-btn {
         position: absolute;
-        top: 16px;
-        right: 16px;
-        width: 40px;
-        height: 40px;
-        border-radius: 50%;
+        bottom: 60px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255, 255, 255, 0.9);
+        color: #003040;
+        border: none;
+        border-radius: 999px;
+        padding: 12px 20px;
+        font-size: 14px;
+        cursor: pointer;
+        z-index: 5;
+      }
+      .close-btn {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        background: none;
         border: none;
         color: #fff;
-        background: rgba(0, 0, 0, 0.6);
-        font-size: 22px;
+        font-size: 28px;
         cursor: pointer;
-        z-index: 10;
+        z-index: 5;
       }
-      #status {
+
+      #scrim {
         position: absolute;
-        top: 16px;
-        left: 16px;
-        color: #0f0;
-        background: rgba(0, 0, 0, 0.5);
-        padding: 6px 10px;
-        border-radius: 8px;
-        font-family: system-ui, sans-serif;
-        font-size: 13px;
-        max-width: 85vw;
-        word-wrap: break-word;
+        inset: 0;
+        background: rgba(7, 72, 94, 0.7);
+        display: none;
+        z-index: 8;
+      }
+      #manualModal {
+        position: absolute;
+        inset: 0;
+        display: none;
+        z-index: 9;
+        align-items: center;
+        justify-content: center;
+      }
+      .card {
+        width: min(92vw, 360px);
+        background: #fff;
+        color: #0b2530;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        padding: 18px;
+      }
+      .card h2 {
+        margin: 4px 0 8px;
+        font-size: 20px;
+        font-weight: 600;
+      }
+      .card p {
+        margin: 8px 0;
+        font-size: 14px;
+        color: #334a57;
+        line-height: 1.35;
+      }
+      .field {
+        margin-top: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid #cbd5dc;
+        border-radius: 6px;
+        padding: 10px 12px;
+      }
+      .field input {
+        border: none;
+        outline: none;
+        flex: 1;
+        font-size: 16px;
+        color: #102a36;
+      }
+      .helper {
+        margin-top: 6px;
+        font-size: 12px;
+        color: #6b8796;
+        padding-left: 4px;
+      }
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 16px;
+      }
+      .btn {
+        border-radius: 999px;
+        padding: 10px 16px;
+        font-size: 14px;
+        cursor: pointer;
+        border: 1px solid transparent;
+      }
+      .btn-ghost {
+        background: #fff;
+        border-color: #0b2530;
+        color: #0b2530;
+      }
+      .btn-primary {
+        background: #0b4254;
+        color: #fff;
+      }
+      .clear-x {
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: #7b8c97;
+        font-size: 18px;
+        line-height: 1;
       }
     </style>
     <script src="https://unpkg.com/@zxing/library@0.21.2"></script>
@@ -92,272 +167,196 @@
     <div id="wrap">
       <video id="video" autoplay playsinline muted></video>
       <canvas id="overlay"></canvas>
-      <div id="status">Initializing…</div>
-      <button id="closeBtn" title="Close">×</button>
 
-      <div id="ui">
-        <select id="deviceSelect" title="Select camera"></select>
-        <button id="toggleTorch">Torch</button>
-        <button id="pauseBtn">Pause</button>
-        <button id="resumeBtn" disabled>Resume</button>
+      <div class="title">
+        Enter the barcode of the <b>first sachet</b><br />in the new roll.
+      </div>
+
+      <button class="manual-btn" id="openManualBtn">Enter code manually</button>
+      <button class="close-btn" onclick="sendClose()">×</button>
+
+      <div id="scrim"></div>
+      <div id="manualModal" role="dialog" aria-modal="true">
+        <div class="card">
+          <h2>Enter Code Manually</h2>
+          <p>
+            Having trouble scanning the barcode? No worries! Just type in the
+            sachet code below. You can find the code right under the barcode.
+          </p>
+          <div class="field">
+            <input
+              id="manualInput"
+              type="text"
+              placeholder="E.g. ABC123456789"
+              maxlength="32"
+            />
+            <button class="clear-x" id="clearBtn" title="Clear">✕</button>
+          </div>
+          <div class="helper">Enter a 10-digit code.</div>
+          <div class="actions">
+            <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
+            <button class="btn btn-primary" id="confirmBtn" disabled>
+              Confirm
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
     <script>
-      const ZX = window.ZXingBrowser || window.ZXing;
-      const {
-        BrowserMultiFormatReader,
-        NotFoundException,
-        BarcodeFormat,
-        DecodeHintType,
-      } = ZX;
-
       const video = document.getElementById("video");
       const overlay = document.getElementById("overlay");
       const ctx = overlay.getContext("2d");
-      const closeBtn = document.getElementById("closeBtn");
-      const deviceSelect = document.getElementById("deviceSelect");
-      const torchBtn = document.getElementById("toggleTorch");
-      const pauseBtn = document.getElementById("pauseBtn");
-      const resumeBtn = document.getElementById("resumeBtn");
-      const statusEl = document.getElementById("status");
+      const ZX = window.ZXingBrowser || window.ZXing;
+      const { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } = ZX;
 
-      let codeReader = null;
-      let currentDeviceId = null;
-      let currentStream = null;
+      const scrim = document.getElementById("scrim");
+      const modal = document.getElementById("manualModal");
+      const openManualBtn = document.getElementById("openManualBtn");
+      const inputEl = document.getElementById("manualInput");
+      const cancelBtn = document.getElementById("cancelBtn");
+      const confirmBtn = document.getElementById("confirmBtn");
+      const clearBtn = document.getElementById("clearBtn");
+
+      let reader = null;
       let scanning = true;
-      let torchOn = false;
 
-      function postToRN(payload) {
-        try {
-          if (window.ReactNativeWebView) {
-            window.ReactNativeWebView.postMessage(JSON.stringify(payload));
-          } else {
-            console.log("[RN MESSAGE]", payload);
-          }
-        } catch (e) {
-          console.warn("postMessage failed", e);
+      function sendMessage(obj) {
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify(obj));
+        } else {
+          console.log("[RN]", obj);
         }
       }
+      function sendClose() {
+        sendMessage({ type: "close" });
+      }
 
-      closeBtn.addEventListener("click", () => {
-        cleanupStream();
-        postToRN({ type: "close" });
-      });
+      function drawMask(w, h, withHole = true) {
+        const boxW = w * 0.5;
+        const boxH = h * 0.5;
+        const x = (w - boxW) / 2;
+        const y = (h - boxH) / 2;
 
-      pauseBtn.addEventListener("click", () => {
-        scanning = false;
-        pauseBtn.disabled = true;
-        resumeBtn.disabled = false;
-        try {
-          codeReader?.stopStreams();
-        } catch {}
-        statusEl.textContent = "Paused";
-      });
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = "rgba(22, 91, 118, 0.9)";
+        ctx.fillRect(0, 0, w, h);
 
-      resumeBtn.addEventListener("click", async () => {
-        scanning = true;
-        resumeBtn.disabled = true;
-        pauseBtn.disabled = false;
-        statusEl.textContent = "Resuming…";
-        await startDecoding(currentDeviceId);
-      });
+        if (withHole) {
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.fillStyle = "#000";
+          ctx.fillRect(x, y, boxW, boxH);
+          ctx.globalCompositeOperation = "source-over";
 
-      torchBtn.addEventListener("click", async () => {
-        try {
-          if (!currentStream) return;
-          const track = currentStream.getVideoTracks()[0];
-          const caps = track.getCapabilities?.();
-          if (caps && caps.torch) {
-            torchOn = !torchOn;
-            await track.applyConstraints({ advanced: [{ torch: torchOn }] });
-            torchBtn.textContent = torchOn ? "Torch (On)" : "Torch";
-          } else {
-            alert("Torch not supported on this camera.");
-          }
-        } catch (e) {
-          console.error("Torch toggle failed", e);
-          alert("Cannot toggle torch: " + e.message);
-        }
-      });
-
-      deviceSelect.addEventListener("change", async (e) => {
-        currentDeviceId = e.target.value;
-        await startDecoding(currentDeviceId);
-      });
-
-      function cleanupStream() {
-        try {
-          codeReader?.stopStreams?.();
-        } catch {}
-        if (currentStream) {
-          currentStream.getTracks().forEach((t) => t.stop());
-          currentStream = null;
+          const r = 12,
+            corner = 30,
+            lw = 5;
+          ctx.lineWidth = lw;
+          ctx.strokeStyle = "#fff";
+          ctx.beginPath();
+          // TL
+          ctx.moveTo(x, y + corner);
+          ctx.lineTo(x, y + r);
+          ctx.quadraticCurveTo(x, y, x + r, y);
+          ctx.lineTo(x + corner, y);
+          // TR
+          ctx.moveTo(x + boxW - corner, y);
+          ctx.lineTo(x + boxW - r, y);
+          ctx.quadraticCurveTo(x + boxW, y, x + boxW, y + r);
+          ctx.lineTo(x + boxW, y + corner);
+          // BR
+          ctx.moveTo(x + boxW, y + boxH - corner);
+          ctx.lineTo(x + boxW, y + boxH - r);
+          ctx.quadraticCurveTo(x + boxW, y + boxH, x + boxW - r, y + boxH);
+          ctx.lineTo(x + boxW - corner, y + boxH);
+          // BL
+          ctx.moveTo(x + corner, y + boxH);
+          ctx.lineTo(x + r, y + boxH);
+          ctx.quadraticCurveTo(x, y + boxH, x, y + boxH - r);
+          ctx.lineTo(x, y + boxH - corner);
+          ctx.stroke();
         }
       }
 
       function resizeCanvas() {
-        const cssW =
-          video.clientWidth || overlay.clientWidth || window.innerWidth;
-        const cssH =
-          video.clientHeight || overlay.clientHeight || window.innerHeight;
+        const cssW = video.clientWidth || window.innerWidth;
+        const cssH = video.clientHeight || window.innerHeight;
         const dpr = window.devicePixelRatio || 1;
-
-        overlay.width = Math.max(1, Math.floor(cssW * dpr));
-        overlay.height = Math.max(1, Math.floor(cssH * dpr));
-
+        overlay.width = cssW * dpr;
+        overlay.height = cssH * dpr;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.clearRect(0, 0, cssW, cssH);
-
-        drawOverlayBox(cssW, cssH);
+        drawMask(cssW, cssH, scanning);
       }
-
-      function drawOverlayBox(w, h) {
-        const boxW = Math.min(w, h) * 0.7;
-        const boxH = boxW * 0.6;
-        const x = (w - boxW) / 2;
-        const y = (h - boxH) / 2;
-        ctx.clearRect(0, 0, w, h);
-        ctx.strokeStyle = "rgba(0,255,0,0.8)";
-        ctx.lineWidth = 3;
-        ctx.strokeRect(x, y, boxW, boxH);
-      }
-
       window.addEventListener("resize", () =>
         requestAnimationFrame(resizeCanvas)
       );
 
-      async function listVideoInputs() {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        return devices.filter((d) => d.kind === "videoinput");
+      function openManual() {
+        scanning = false;
+        resizeCanvas();
+        scrim.style.display = "block";
+        modal.style.display = "flex";
+        inputEl.value = "";
+        confirmBtn.disabled = true;
+        setTimeout(() => inputEl.focus(), 50);
+      }
+      function closeManual() {
+        modal.style.display = "none";
+        scrim.style.display = "none";
+        scanning = true;
+        resizeCanvas();
       }
 
-      async function initAndPickCamera() {
-        codeReader = new BrowserMultiFormatReader();
+      openManualBtn.addEventListener("click", openManual);
+      cancelBtn.addEventListener("click", closeManual);
+      clearBtn.addEventListener("click", () => {
+        inputEl.value = "";
+        inputEl.focus();
+        confirmBtn.disabled = true;
+      });
+      inputEl.addEventListener("input", () => {
+        confirmBtn.disabled = !inputEl.value.trim();
+      });
+      inputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !confirmBtn.disabled) confirmBtn.click();
+      });
 
-        const cams = await listVideoInputs();
-        deviceSelect.innerHTML = "";
-        cams.forEach((d, i) => {
-          const opt = document.createElement("option");
-          opt.value = d.deviceId;
-          opt.textContent = d.label || `Camera ${i + 1}`;
-          deviceSelect.appendChild(opt);
-        });
+      confirmBtn.addEventListener("click", () => {
+        const text = inputEl.value.trim();
+        if (!text) return;
+        sendMessage({ type: "manual_submit", text });
+        closeManual();
+      });
 
-        if (cams.length === 0) {
-          statusEl.textContent = "No camera found";
-          postToRN({ type: "error", message: "No camera found" });
-          return null;
-        }
-
-        let picked = cams[0].deviceId;
-        const back = cams.find((d) => /back|rear|environment/i.test(d.label));
-        if (back) picked = back.deviceId;
-
-        deviceSelect.value = picked;
-        return picked;
-      }
-
-      async function startDecoding(deviceId) {
+      async function startScanner() {
         try {
-          cleanupStream();
-          statusEl.textContent = "Starting camera…";
-
-          currentStream = await navigator.mediaDevices.getUserMedia({
-            video: deviceId
-              ? { deviceId: { exact: deviceId } }
-              : { facingMode: "environment" },
-            audio: false,
-          });
-          video.srcObject = currentStream;
-
-          await new Promise((res) => {
-            if (video.readyState >= 2) res();
-            else video.onloadedmetadata = () => res();
-          });
-
-          requestAnimationFrame(resizeCanvas);
-          video.onresize = () => requestAnimationFrame(resizeCanvas);
-
-          postToRN({ type: "ready" });
-          statusEl.textContent = "Scanning…";
-
           const hints = new Map();
-          const formats = [
-            BarcodeFormat.QR_CODE,
-            BarcodeFormat.EAN_13,
-            BarcodeFormat.EAN_8,
+          hints.set(DecodeHintType.POSSIBLE_FORMATS, [
             BarcodeFormat.CODE_128,
             BarcodeFormat.CODE_39,
+            BarcodeFormat.EAN_13,
+            BarcodeFormat.EAN_8,
             BarcodeFormat.UPC_A,
             BarcodeFormat.UPC_E,
             BarcodeFormat.ITF,
-          ];
-          hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
-          codeReader = new BrowserMultiFormatReader(hints);
+            BarcodeFormat.QR_CODE,
+          ]);
+          reader = new BrowserMultiFormatReader(hints);
 
-          await codeReader.decodeFromVideoDevice(
-            deviceId || null,
-            video,
-            (result, err) => {
-              if (!scanning) return;
-
-              // vẽ khung theo kích thước hiển thị mỗi frame
-              const cssW =
-                video.clientWidth || overlay.clientWidth || window.innerWidth;
-              const cssH =
-                video.clientHeight ||
-                overlay.clientHeight ||
-                window.innerHeight;
-              drawOverlayBox(cssW, cssH);
-
-              if (result) {
-                const text = result.getText
-                  ? result.getText()
-                  : result.text || "";
-                const format = result.getBarcodeFormat
-                  ? result.getBarcodeFormat()
-                  : result.barcodeFormat || result.format || "UNKNOWN";
-                statusEl.textContent = `Found: ${text} (${format})`;
-                postToRN({ type: "scan", text, format, ts: Date.now() });
-
-                scanning = false;
-                pauseBtn.disabled = true;
-                resumeBtn.disabled = false;
-                setTimeout(() => {
-                  statusEl.textContent = "Paused after detection";
-                }, 100);
-              } else if (err && !(err instanceof NotFoundException)) {
-                console.warn(err);
-                statusEl.textContent = "Error while scanning";
-              }
+          await reader.decodeFromVideoDevice(null, video, (result) => {
+            resizeCanvas();
+            if (!scanning) return;
+            if (result) {
+              const text = result.getText?.() || result.text || "";
+              sendMessage({ type: "scan", text });
             }
-          );
-        } catch (e) {
-          console.error("startDecoding error", e);
-          statusEl.textContent = "Camera error: " + e.message;
-          postToRN({ type: "error", message: e.message });
-        }
-      }
-
-      (async () => {
-        try {
-          if (!navigator.mediaDevices?.getUserMedia) {
-            statusEl.textContent = "This browser does not support camera.";
-            postToRN({ type: "error", message: "getUserMedia unsupported" });
-            return;
-          }
-          const picked = await initAndPickCamera();
-          if (picked) {
-            currentDeviceId = picked;
-            await startDecoding(picked);
-          }
+          });
         } catch (e) {
           console.error(e);
-          statusEl.textContent = "Init error: " + e.message;
-          postToRN({ type: "error", message: e.message });
+          sendMessage({ type: "error", message: e.message });
         }
-      })();
+      }
+      startScanner();
     </script>
   </body>
 </html>
