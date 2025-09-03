@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Camera Scanner (Stable)</title>
+    <title>Camera Scanner</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
       html,
@@ -46,7 +46,6 @@
           rgba(0, 0, 0, 0.6),
           rgba(0, 0, 0, 0)
         );
-        z-index: 5;
       }
       #ui button,
       #ui select {
@@ -84,7 +83,6 @@
         font-size: 13px;
         max-width: 85vw;
         word-wrap: break-word;
-        z-index: 6;
       }
     </style>
     <script src="https://unpkg.com/@zxing/library@0.21.2"></script>
@@ -99,6 +97,7 @@
 
       <div id="ui">
         <select id="deviceSelect" title="Select camera"></select>
+        <button id="toggleTorch">Torch</button>
         <button id="pauseBtn">Pause</button>
         <button id="resumeBtn" disabled>Resume</button>
       </div>
@@ -118,6 +117,7 @@
       const ctx = overlay.getContext("2d");
       const closeBtn = document.getElementById("closeBtn");
       const deviceSelect = document.getElementById("deviceSelect");
+      const torchBtn = document.getElementById("toggleTorch");
       const pauseBtn = document.getElementById("pauseBtn");
       const resumeBtn = document.getElementById("resumeBtn");
       const statusEl = document.getElementById("status");
@@ -126,6 +126,7 @@
       let currentDeviceId = null;
       let currentStream = null;
       let scanning = true;
+      let torchOn = false;
 
       function postToRN(payload) {
         try {
@@ -134,8 +135,56 @@
           } else {
             console.log("[RN MESSAGE]", payload);
           }
-        } catch (e) {}
+        } catch (e) {
+          console.warn("postMessage failed", e);
+        }
       }
+
+      closeBtn.addEventListener("click", () => {
+        cleanupStream();
+        postToRN({ type: "close" });
+      });
+
+      pauseBtn.addEventListener("click", () => {
+        scanning = false;
+        pauseBtn.disabled = true;
+        resumeBtn.disabled = false;
+        try {
+          codeReader?.stopStreams();
+        } catch {}
+        statusEl.textContent = "Paused";
+      });
+
+      resumeBtn.addEventListener("click", async () => {
+        scanning = true;
+        resumeBtn.disabled = true;
+        pauseBtn.disabled = false;
+        statusEl.textContent = "Resuming…";
+        await startDecoding(currentDeviceId);
+      });
+
+      torchBtn.addEventListener("click", async () => {
+        try {
+          if (!currentStream) return;
+          const track = currentStream.getVideoTracks()[0];
+          const caps = track.getCapabilities?.();
+          if (caps && caps.torch) {
+            torchOn = !torchOn;
+            await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+            torchBtn.textContent = torchOn ? "Torch (On)" : "Torch";
+          } else {
+            alert("Torch not supported on this camera.");
+          }
+        } catch (e) {
+          console.error("Torch toggle failed", e);
+          alert("Cannot toggle torch: " + e.message);
+        }
+      });
+
+      deviceSelect.addEventListener("change", async (e) => {
+        currentDeviceId = e.target.value;
+        await startDecoding(currentDeviceId);
+      });
 
       function cleanupStream() {
         try {
@@ -153,51 +202,30 @@
         const cssH =
           video.clientHeight || overlay.clientHeight || window.innerHeight;
         const dpr = window.devicePixelRatio || 1;
+
         overlay.width = Math.max(1, Math.floor(cssW * dpr));
         overlay.height = Math.max(1, Math.floor(cssH * dpr));
+
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, cssW, cssH);
+
         drawOverlayBox(cssW, cssH);
       }
 
       function drawOverlayBox(w, h) {
         const boxW = Math.min(w, h) * 0.7;
-        const boxH = boxW * 0.35;
+        const boxH = boxW * 0.6;
         const x = (w - boxW) / 2;
         const y = (h - boxH) / 2;
         ctx.clearRect(0, 0, w, h);
-        ctx.strokeStyle = "rgba(0,255,0,0.9)";
+        ctx.strokeStyle = "rgba(0,255,0,0.8)";
         ctx.lineWidth = 3;
         ctx.strokeRect(x, y, boxW, boxH);
       }
+
       window.addEventListener("resize", () =>
         requestAnimationFrame(resizeCanvas)
       );
-
-      closeBtn.addEventListener("click", () => {
-        cleanupStream();
-        postToRN({ type: "close" });
-      });
-      pauseBtn.addEventListener("click", () => {
-        scanning = false;
-        pauseBtn.disabled = true;
-        resumeBtn.disabled = false;
-        try {
-          codeReader?.stopStreams();
-        } catch {}
-        statusEl.textContent = "Paused";
-      });
-      resumeBtn.addEventListener("click", async () => {
-        scanning = true;
-        resumeBtn.disabled = true;
-        pauseBtn.disabled = false;
-        statusEl.textContent = "Resuming…";
-        await startDecoding(currentDeviceId);
-      });
-      deviceSelect.addEventListener("change", async (e) => {
-        currentDeviceId = e.target.value;
-        await startDecoding(currentDeviceId);
-      });
 
       async function listVideoInputs() {
         const devices = await navigator.mediaDevices.enumerateDevices();
@@ -206,6 +234,7 @@
 
       async function initAndPickCamera() {
         codeReader = new BrowserMultiFormatReader();
+
         const cams = await listVideoInputs();
         deviceSelect.innerHTML = "";
         cams.forEach((d, i) => {
@@ -214,14 +243,17 @@
           opt.textContent = d.label || `Camera ${i + 1}`;
           deviceSelect.appendChild(opt);
         });
+
         if (cams.length === 0) {
           statusEl.textContent = "No camera found";
           postToRN({ type: "error", message: "No camera found" });
           return null;
         }
+
         let picked = cams[0].deviceId;
         const back = cams.find((d) => /back|rear|environment/i.test(d.label));
         if (back) picked = back.deviceId;
+
         deviceSelect.value = picked;
         return picked;
       }
@@ -233,18 +265,8 @@
 
           currentStream = await navigator.mediaDevices.getUserMedia({
             video: deviceId
-              ? {
-                  deviceId: { exact: deviceId },
-                  width: { ideal: 1280 },
-                  height: { ideal: 720 },
-                  frameRate: { ideal: 30 },
-                }
-              : {
-                  facingMode: { ideal: "environment" },
-                  width: { ideal: 1280 },
-                  height: { ideal: 720 },
-                  frameRate: { ideal: 30 },
-                },
+              ? { deviceId: { exact: deviceId } }
+              : { facingMode: "environment" },
             audio: false,
           });
           video.srcObject = currentStream;
@@ -253,6 +275,7 @@
             if (video.readyState >= 2) res();
             else video.onloadedmetadata = () => res();
           });
+
           requestAnimationFrame(resizeCanvas);
           video.onresize = () => requestAnimationFrame(resizeCanvas);
 
@@ -261,14 +284,14 @@
 
           const hints = new Map();
           const formats = [
-            BarcodeFormat.CODE_128,
-            BarcodeFormat.CODE_39,
+            BarcodeFormat.QR_CODE,
             BarcodeFormat.EAN_13,
             BarcodeFormat.EAN_8,
+            BarcodeFormat.CODE_128,
+            BarcodeFormat.CODE_39,
             BarcodeFormat.UPC_A,
             BarcodeFormat.UPC_E,
             BarcodeFormat.ITF,
-            BarcodeFormat.QR_CODE,
           ];
           hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
           codeReader = new BrowserMultiFormatReader(hints);
@@ -279,6 +302,7 @@
             (result, err) => {
               if (!scanning) return;
 
+              // vẽ khung theo kích thước hiển thị mỗi frame
               const cssW =
                 video.clientWidth || overlay.clientWidth || window.innerWidth;
               const cssH =
