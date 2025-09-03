@@ -47,20 +47,6 @@
       .title b {
         font-weight: 700;
       }
-      .manual-btn {
-        position: absolute;
-        bottom: 60px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(255, 255, 255, 0.9);
-        color: #003040;
-        border: none;
-        border-radius: 999px;
-        padding: 12px 20px;
-        font-size: 14px;
-        cursor: pointer;
-        z-index: 5;
-      }
       .close-btn {
         position: absolute;
         top: 20px;
@@ -71,93 +57,6 @@
         font-size: 28px;
         cursor: pointer;
         z-index: 5;
-      }
-
-      #scrim {
-        position: absolute;
-        inset: 0;
-        background: rgba(7, 72, 94, 0.7);
-        display: none;
-        z-index: 8;
-      }
-      #manualModal {
-        position: absolute;
-        inset: 0;
-        display: none;
-        z-index: 9;
-        align-items: center;
-        justify-content: center;
-      }
-      .card {
-        width: min(92vw, 360px);
-        background: #fff;
-        color: #0b2530;
-        border-radius: 12px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-        padding: 18px;
-      }
-      .card h2 {
-        margin: 4px 0 8px;
-        font-size: 20px;
-        font-weight: 600;
-      }
-      .card p {
-        margin: 8px 0;
-        font-size: 14px;
-        color: #334a57;
-        line-height: 1.35;
-      }
-      .field {
-        margin-top: 12px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        border: 1px solid #cbd5dc;
-        border-radius: 6px;
-        padding: 10px 12px;
-      }
-      .field input {
-        border: none;
-        outline: none;
-        flex: 1;
-        font-size: 16px;
-        color: #102a36;
-      }
-      .helper {
-        margin-top: 6px;
-        font-size: 12px;
-        color: #6b8796;
-        padding-left: 4px;
-      }
-      .actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 10px;
-        margin-top: 16px;
-      }
-      .btn {
-        border-radius: 999px;
-        padding: 10px 16px;
-        font-size: 14px;
-        cursor: pointer;
-        border: 1px solid transparent;
-      }
-      .btn-ghost {
-        background: #fff;
-        border-color: #0b2530;
-        color: #0b2530;
-      }
-      .btn-primary {
-        background: #0b4254;
-        color: #fff;
-      }
-      .clear-x {
-        background: none;
-        border: none;
-        cursor: pointer;
-        color: #7b8c97;
-        font-size: 18px;
-        line-height: 1;
       }
     </style>
     <script src="https://unpkg.com/@zxing/library@0.21.2"></script>
@@ -172,35 +71,7 @@
         Enter the barcode of the <b>first sachet</b><br />in the new roll.
       </div>
 
-      <button class="manual-btn" id="openManualBtn">Enter code manually</button>
       <button class="close-btn" onclick="sendClose()">×</button>
-
-      <div id="scrim"></div>
-      <div id="manualModal" role="dialog" aria-modal="true">
-        <div class="card">
-          <h2>Enter Code Manually</h2>
-          <p>
-            Having trouble scanning the barcode? No worries! Just type in the
-            sachet code below. You can find the code right under the barcode.
-          </p>
-          <div class="field">
-            <input
-              id="manualInput"
-              type="text"
-              placeholder="E.g. ABC123456789"
-              maxlength="32"
-            />
-            <button class="clear-x" id="clearBtn" title="Clear">✕</button>
-          </div>
-          <div class="helper">Enter a 10-digit code.</div>
-          <div class="actions">
-            <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
-            <button class="btn btn-primary" id="confirmBtn" disabled>
-              Confirm
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
 
     <script>
@@ -209,14 +80,6 @@
       const ctx = overlay.getContext("2d");
       const ZX = window.ZXingBrowser || window.ZXing;
       const { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } = ZX;
-
-      const scrim = document.getElementById("scrim");
-      const modal = document.getElementById("manualModal");
-      const openManualBtn = document.getElementById("openManualBtn");
-      const inputEl = document.getElementById("manualInput");
-      const cancelBtn = document.getElementById("cancelBtn");
-      const confirmBtn = document.getElementById("confirmBtn");
-      const clearBtn = document.getElementById("clearBtn");
 
       let reader = null;
       let scanning = true;
@@ -231,6 +94,11 @@
       function sendClose() {
         sendMessage({ type: "close" });
       }
+
+      window.__setScanning = (flag) => {
+        scanning = !!flag;
+        resizeCanvas();
+      };
 
       function drawMask(w, h, withHole = true) {
         const boxW = w * 0.5;
@@ -291,43 +159,6 @@
         requestAnimationFrame(resizeCanvas)
       );
 
-      function openManual() {
-        scanning = false;
-        resizeCanvas();
-        scrim.style.display = "block";
-        modal.style.display = "flex";
-        inputEl.value = "";
-        confirmBtn.disabled = true;
-        setTimeout(() => inputEl.focus(), 50);
-      }
-      function closeManual() {
-        modal.style.display = "none";
-        scrim.style.display = "none";
-        scanning = true;
-        resizeCanvas();
-      }
-
-      openManualBtn.addEventListener("click", openManual);
-      cancelBtn.addEventListener("click", closeManual);
-      clearBtn.addEventListener("click", () => {
-        inputEl.value = "";
-        inputEl.focus();
-        confirmBtn.disabled = true;
-      });
-      inputEl.addEventListener("input", () => {
-        confirmBtn.disabled = !inputEl.value.trim();
-      });
-      inputEl.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !confirmBtn.disabled) confirmBtn.click();
-      });
-
-      confirmBtn.addEventListener("click", () => {
-        const text = inputEl.value.trim();
-        if (!text) return;
-        sendMessage({ type: "manual_submit", text });
-        closeManual();
-      });
-
       async function startScanner() {
         try {
           const hints = new Map();
@@ -342,6 +173,8 @@
             BarcodeFormat.QR_CODE,
           ]);
           reader = new BrowserMultiFormatReader(hints);
+
+          sendMessage({ type: "ready" });
 
           await reader.decodeFromVideoDevice(null, video, (result) => {
             resizeCanvas();
