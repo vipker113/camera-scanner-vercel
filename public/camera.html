@@ -81,7 +81,7 @@
         border-radius: 8px;
         font-family: system-ui, sans-serif;
         font-size: 13px;
-        max-width: 70vw;
+        max-width: 85vw;
         word-wrap: break-word;
       }
     </style>
@@ -104,12 +104,14 @@
     </div>
 
     <script>
+      const ZX = window.ZXingBrowser || window.ZXing;
       const {
         BrowserMultiFormatReader,
         NotFoundException,
         BarcodeFormat,
         DecodeHintType,
-      } = ZXing;
+      } = ZX;
+
       const video = document.getElementById("video");
       const overlay = document.getElementById("overlay");
       const ctx = overlay.getContext("2d");
@@ -120,7 +122,7 @@
       const resumeBtn = document.getElementById("resumeBtn");
       const statusEl = document.getElementById("status");
 
-      let codeReader;
+      let codeReader = null;
       let currentDeviceId = null;
       let currentStream = null;
       let scanning = true;
@@ -139,16 +141,20 @@
       }
 
       closeBtn.addEventListener("click", () => {
-        stopStream();
+        cleanupStream();
         postToRN({ type: "close" });
       });
+
       pauseBtn.addEventListener("click", () => {
         scanning = false;
         pauseBtn.disabled = true;
         resumeBtn.disabled = false;
-        codeReader?.stopStreams();
+        try {
+          codeReader?.stopStreams();
+        } catch {}
         statusEl.textContent = "Paused";
       });
+
       resumeBtn.addEventListener("click", async () => {
         scanning = true;
         resumeBtn.disabled = true;
@@ -181,9 +187,9 @@
         await startDecoding(id);
       });
 
-      function stopStream() {
+      function cleanupStream() {
         try {
-          codeReader?.stopStreams();
+          codeReader?.stopStreams?.();
         } catch {}
         if (currentStream) {
           currentStream.getTracks().forEach((t) => t.stop());
@@ -192,52 +198,60 @@
       }
 
       function drawOverlayBox() {
-        const w = overlay.width,
-          h = overlay.height;
+        const w = overlay.width;
+        const h = overlay.height;
         ctx.clearRect(0, 0, w, h);
-        const boxW = Math.min(w, h) * 0.7,
-          boxH = boxW * 0.6;
-        const x = (w - boxW) / 2,
-          y = (h - boxH) / 2;
+        const boxW = Math.min(w, h) * 0.7;
+        const boxH = boxW * 0.6;
+        const x = (w - boxW) / 2;
+        const y = (h - boxH) / 2;
         ctx.strokeStyle = "rgba(0,255,0,0.8)";
         ctx.lineWidth = 3;
         ctx.strokeRect(x, y, boxW, boxH);
       }
+
       function resizeCanvas() {
         overlay.width = video.videoWidth || overlay.clientWidth;
         overlay.height = video.videoHeight || overlay.clientHeight;
         drawOverlayBox();
       }
 
-      async function listDevicesAndInit() {
+      async function listVideoInputs() {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        return devices.filter((d) => d.kind === "videoinput");
+      }
+
+      async function initAndPickCamera() {
         codeReader = new BrowserMultiFormatReader();
-        const devices = await BrowserMultiFormatReader.listVideoInputDevices();
+
+        const cams = await listVideoInputs();
         deviceSelect.innerHTML = "";
-        devices.forEach((d) => {
+        cams.forEach((d, i) => {
           const opt = document.createElement("option");
           opt.value = d.deviceId;
-          opt.textContent = d.label || `Camera ${deviceSelect.length + 1}`;
+          opt.textContent = d.label || `Camera ${i + 1}`;
           deviceSelect.appendChild(opt);
         });
-        if (devices.length === 0) {
+
+        if (cams.length === 0) {
           statusEl.textContent = "No camera found";
           postToRN({ type: "error", message: "No camera found" });
-          return;
+          return null;
         }
-        let picked = devices[0].deviceId;
-        const back = devices.find((d) =>
-          /back|rear|environment/i.test(d.label)
-        );
+
+        let picked = cams[0].deviceId;
+        const back = cams.find((d) => /back|rear|environment/i.test(d.label));
         if (back) picked = back.deviceId;
-        currentDeviceId = picked;
-        deviceSelect.value = currentDeviceId;
-        await startDecoding(currentDeviceId);
+
+        deviceSelect.value = picked;
+        return picked;
       }
 
       async function startDecoding(deviceId) {
         try {
-          stopStream();
+          cleanupStream();
           statusEl.textContent = "Starting camera…";
+
           currentStream = await navigator.mediaDevices.getUserMedia({
             video: deviceId
               ? { deviceId: { exact: deviceId } }
@@ -245,12 +259,15 @@
             audio: false,
           });
           video.srcObject = currentStream;
+
           await new Promise((res) => {
             if (video.readyState >= 2) res();
             else video.onloadedmetadata = () => res();
           });
+
           resizeCanvas();
           video.onresize = resizeCanvas;
+
           postToRN({ type: "ready" });
           statusEl.textContent = "Scanning…";
 
@@ -283,6 +300,7 @@
                   : result.barcodeFormat || result.format || "UNKNOWN";
                 statusEl.textContent = `Found: ${text} (${format})`;
                 postToRN({ type: "scan", text, format, ts: Date.now() });
+
                 scanning = false;
                 pauseBtn.disabled = true;
                 resumeBtn.disabled = false;
@@ -304,7 +322,16 @@
 
       (async () => {
         try {
-          await listDevicesAndInit();
+          if (!navigator.mediaDevices?.getUserMedia) {
+            statusEl.textContent = "This browser does not support camera.";
+            postToRN({ type: "error", message: "getUserMedia unsupported" });
+            return;
+          }
+          const picked = await initAndPickCamera();
+          if (picked) {
+            currentDeviceId = picked;
+            await startDecoding(picked);
+          }
         } catch (e) {
           console.error(e);
           statusEl.textContent = "Init error: " + e.message;
