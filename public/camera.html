@@ -46,6 +46,7 @@
           rgba(0, 0, 0, 0.6),
           rgba(0, 0, 0, 0)
         );
+        z-index: 5;
       }
       #ui button,
       #ui select {
@@ -83,6 +84,7 @@
         font-size: 13px;
         max-width: 85vw;
         word-wrap: break-word;
+        z-index: 6;
       }
     </style>
     <script src="https://unpkg.com/@zxing/library@0.21.2"></script>
@@ -140,6 +142,47 @@
         }
       }
 
+      function cleanupStream() {
+        try {
+          codeReader?.stopStreams?.();
+        } catch {}
+        if (currentStream) {
+          currentStream.getTracks().forEach((t) => t.stop());
+          currentStream = null;
+        }
+      }
+
+      function resizeCanvas() {
+        const cssW =
+          video.clientWidth || overlay.clientWidth || window.innerWidth;
+        const cssH =
+          video.clientHeight || overlay.clientHeight || window.innerHeight;
+        const dpr = window.devicePixelRatio || 1;
+
+        overlay.width = Math.max(1, Math.floor(cssW * dpr));
+        overlay.height = Math.max(1, Math.floor(cssH * dpr));
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, cssW, cssH);
+
+        drawOverlayBox(cssW, cssH);
+      }
+
+      function drawOverlayBox(w, h) {
+        const boxW = Math.min(w, h) * 0.7;
+        const boxH = boxW * 0.35;
+        const x = (w - boxW) / 2;
+        const y = (h - boxH) / 2;
+
+        ctx.clearRect(0, 0, w, h);
+        ctx.strokeStyle = "rgba(0,255,0,0.9)";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, boxW, boxH);
+      }
+
+      window.addEventListener("resize", () =>
+        requestAnimationFrame(resizeCanvas)
+      );
+
       closeBtn.addEventListener("click", () => {
         cleanupStream();
         postToRN({ type: "close" });
@@ -182,39 +225,9 @@
       });
 
       deviceSelect.addEventListener("change", async (e) => {
-        const id = e.target.value;
-        currentDeviceId = id;
-        await startDecoding(id);
+        currentDeviceId = e.target.value;
+        await startDecoding(currentDeviceId);
       });
-
-      function cleanupStream() {
-        try {
-          codeReader?.stopStreams?.();
-        } catch {}
-        if (currentStream) {
-          currentStream.getTracks().forEach((t) => t.stop());
-          currentStream = null;
-        }
-      }
-
-      function drawOverlayBox() {
-        const w = overlay.width;
-        const h = overlay.height;
-        ctx.clearRect(0, 0, w, h);
-        const boxW = Math.min(w, h) * 0.7;
-        const boxH = boxW * 0.6;
-        const x = (w - boxW) / 2;
-        const y = (h - boxH) / 2;
-        ctx.strokeStyle = "rgba(0,255,0,0.8)";
-        ctx.lineWidth = 3;
-        ctx.strokeRect(x, y, boxW, boxH);
-      }
-
-      function resizeCanvas() {
-        overlay.width = video.videoWidth || overlay.clientWidth;
-        overlay.height = video.videoHeight || overlay.clientHeight;
-        drawOverlayBox();
-      }
 
       async function listVideoInputs() {
         const devices = await navigator.mediaDevices.enumerateDevices();
@@ -253,9 +266,14 @@
           statusEl.textContent = "Starting camera…";
 
           currentStream = await navigator.mediaDevices.getUserMedia({
-            video: deviceId
-              ? { deviceId: { exact: deviceId } }
-              : { facingMode: "environment" },
+            video: {
+              ...(deviceId
+                ? { deviceId: { exact: deviceId } }
+                : { facingMode: { ideal: "environment" } }),
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              frameRate: { ideal: 30 },
+            },
             audio: false,
           });
           video.srcObject = currentStream;
@@ -264,25 +282,42 @@
             if (video.readyState >= 2) res();
             else video.onloadedmetadata = () => res();
           });
+          requestAnimationFrame(resizeCanvas);
+          video.onresize = () => requestAnimationFrame(resizeCanvas);
 
-          resizeCanvas();
-          video.onresize = resizeCanvas;
+          try {
+            const track = currentStream.getVideoTracks()[0];
+            const caps = track.getCapabilities?.() || {};
+            const advanced = [];
+            if (caps.focusMode && caps.focusMode.includes("continuous"))
+              advanced.push({ focusMode: "continuous" });
+            if (caps.zoom) {
+              const midZoom = Math.min(
+                caps.zoom.max ?? 1,
+                Math.max(caps.zoom.min ?? 1, 1.5)
+              );
+              advanced.push({ zoom: midZoom });
+            }
+            if (advanced.length) await track.applyConstraints({ advanced });
+          } catch {}
 
           postToRN({ type: "ready" });
           statusEl.textContent = "Scanning…";
 
           const hints = new Map();
           const formats = [
-            BarcodeFormat.QR_CODE,
-            BarcodeFormat.EAN_13,
-            BarcodeFormat.EAN_8,
             BarcodeFormat.CODE_128,
             BarcodeFormat.CODE_39,
+            BarcodeFormat.EAN_13,
+            BarcodeFormat.EAN_8,
             BarcodeFormat.UPC_A,
             BarcodeFormat.UPC_E,
             BarcodeFormat.ITF,
+            BarcodeFormat.QR_CODE,
           ];
           hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
+          hints.set(DecodeHintType.TRY_HARDER, true);
+
           codeReader = new BrowserMultiFormatReader(hints);
 
           await codeReader.decodeFromVideoDevice(
@@ -290,7 +325,15 @@
             video,
             (result, err) => {
               if (!scanning) return;
-              drawOverlayBox();
+
+              const cssW =
+                video.clientWidth || overlay.clientWidth || window.innerWidth;
+              const cssH =
+                video.clientHeight ||
+                overlay.clientHeight ||
+                window.innerHeight;
+              drawOverlayBox(cssW, cssH);
+
               if (result) {
                 const text = result.getText
                   ? result.getText()
