@@ -72,8 +72,27 @@
             BarcodeFormat.QR_CODE,
           ]);
           const reader = new BrowserMultiFormatReader(hints);
-          post({ type: "ready" });
-          await reader.decodeFromVideoDevice(null, video, (result) => {
+
+          const devices =
+            await BrowserMultiFormatReader.listVideoInputDevices();
+
+          let backCam = null;
+
+          backCam = devices.find(
+            (d) =>
+              d.label.toLowerCase().includes("back") ||
+              d.label.toLowerCase().includes("rear")
+          );
+
+          if (!backCam && devices.length > 1) {
+            backCam = devices[devices.length - 1];
+          }
+
+          const deviceId = backCam ? backCam.deviceId : devices[0]?.deviceId;
+
+          post({ type: "ready", deviceId });
+
+          await reader.decodeFromVideoDevice(deviceId, video, (result) => {
             if (!scanning) return;
             if (result) {
               const text = result.getText?.() || result.text || "";
