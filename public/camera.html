@@ -58,6 +58,11 @@
         scanning = !!flag;
       };
 
+      async function getVideoInputDevices() {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        return devices.filter((d) => d.kind === "videoinput");
+      }
+
       async function start() {
         try {
           const hints = new Map();
@@ -73,37 +78,36 @@
           ]);
           const reader = new BrowserMultiFormatReader(hints);
 
-          const devices =
-            await BrowserMultiFormatReader.listVideoInputDevices();
+          await navigator.mediaDevices.getUserMedia({ video: true });
 
-          let backCam = null;
-
-          backCam = devices.find(
+          const devices = (await getVideoInputDevices()).filter(
             (d) =>
-              d.label.toLowerCase().includes("back") ||
-              d.label.toLowerCase().includes("rear")
+              !d.label.toLowerCase().includes("obs") &&
+              !d.label.toLowerCase().includes("virtual")
           );
-
-          if (!backCam && devices.length > 1) {
-            backCam = devices[devices.length - 1];
-          }
+          let backCam =
+            devices.find(
+              (d) =>
+                d.label.toLowerCase().includes("back") ||
+                d.label.toLowerCase().includes("rear")
+            ) || devices[devices.length - 1];
 
           const deviceId = backCam ? backCam.deviceId : devices[0]?.deviceId;
-
-          post({ type: "ready", deviceId });
-
+          console.log("👉 DeviceId:", deviceId, "label:", backCam?.label);
           await reader.decodeFromVideoDevice(deviceId, video, (result) => {
             if (!scanning) return;
             if (result) {
               const text = result.getText?.() || result.text || "";
+              console.log("✅ Scan:", text);
               post({ type: "scan", text, ts: Date.now() });
             }
           });
         } catch (e) {
-          console.error(e);
+          console.error("❌ Camera error:", e);
           post({ type: "error", message: e.message || "Camera error" });
         }
       }
+
       start();
     </script>
   </body>
